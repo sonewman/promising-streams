@@ -1,0 +1,33 @@
+{
+  "name": "a-streams-promise",
+  "version": "0.0.0",
+  "description": "Streams with support for promise internals",
+  "main": "index.js",
+  "scripts": {
+    "test": "macchiato test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sonewman/a-streams-promise.git"
+  },
+  "keywords": [
+    "streams",
+    "promises"
+  ],
+  "author": "Sam Newman",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/sonewman/a-streams-promise/issues"
+  },
+  "homepage": "https://github.com/sonewman/a-streams-promise#readme",
+  "dependencies": {
+    "consec": "^1.0.2",
+    "macchiato": "^4.2.1",
+    "promise": "^7.0.3",
+    "readable-stream": "^2.0.1",
+    "xtend": "^4.0.0"
+  },
+  "devDependencies": {
+    "macchiato": "^4.1.0"
+  }
+}
