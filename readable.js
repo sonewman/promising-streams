@@ -101,14 +101,22 @@ function bindSingle(ctx, method) {
   }
 }
 
-ReadablePromiseStream.prototype.then = function (success, fail) {
-  var self = this
-  success = bindSingle(self, success)
-  fail = fail && bindSingle(self, fail)
+ReadablePromiseStream.prototype.promise = function () {
+  if (this._done)
+    return Promise.resolve()
 
-  if (self._ended) return Promise.resolve().then(onSuccess)
-  else if (self._error) return Promise.reject(self._error).catch(fail)
-  return MakePromise(self, 'end', onSuccess, fail)
+  else if (this._error)
+    return Promise.reject(this._error);
+
+  return MakePromise(this, 'end');
+};
+};
+
+ReadablePromiseStream.prototype.then = function (success, fail) {
+  var self = this;
+  success = bindSingle(self, success);
+  fail = fail && bindSingle(self, fail);
+  return this.promise().then(onSuccess, fail);
 
   function onSuccess() {
     return success(self._returnvalue)

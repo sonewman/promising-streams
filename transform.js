@@ -135,12 +135,12 @@ TransformPromiseStream.prototype._onTransformPromise = function (promise, next) 
 TransformPromiseStream.prototype._transform = function (chunk, enc, next) {
   var doneNext = false;
 
-  function next_(err) {
+  function next_(err, data) {
     if (doneNext) return;
     doneNext = true;
 
     if (err) next(err);
-    else next();
+    else next(null, data);
   }
 
   var promise = this.__transform(chunk, enc, next_);
@@ -166,11 +166,7 @@ TransformPromiseStream.prototype._onFlushPromise = function (promise, done) {
     done();
   },
   function (err) {
-    self._error = err;
-
-    process.nextTick(function () {
-      done(err);
-    });
+    done(err);
   });
 };
 

@@ -15,6 +15,25 @@ function addToSrc(d, src) {
   })
 }
 
+function handleState(str) {
+  str.on('end', onend)
+  function onend() {
+    if (!str._done) str._done = true
+    cleanup()
+  }
+
+  str.on('error', onerror)
+  function onerror(err) {
+    if (!str._error) str._error = err
+    cleanup()
+  }
+
+  function cleanup() {
+    str.removeListener('end', onend)
+    str.removeListener('error', onerror)
+  }
+}
+
 if ('undefined' === typeof Promise)
   Promise = require('promise'); // eslint-disable-line no-undef
 
@@ -45,7 +64,7 @@ function WritablePromiseStream(options, write) {
     this.data = options.data;
   else
     this.data = [];
-  
+
   // state is added to the stream itself
   // for internal usage
   if (opts.state) this.state = opts.state;
@@ -125,18 +144,21 @@ WritablePromiseStream.prototype._onFinish = function (success) {
   return success(this.data);
 };
 
+WritablePromiseStream.prototype.promise = function () {
+  if (this._done)
+    return Promise.resolve();
+
+  else if (this._error)
+    return Promise.reject(this._error);
+
+  return MakePromise(this, 'finish');
+};
+
 WritablePromiseStream.prototype.then = function (success, fail) {
   var self = this;
   success = bindSingle(self, success);
-  fail = fail && bindSingle(self, fail);
-
-  if (self._done)
-    return Promise.resolve().then(onSuccess);
-
-  else if (fail && self._error)
-    return Promise.reject(self._error).catch(fail);
-
-  return MakePromise(self, 'finish', onSuccess, fail);
+  fail = bindSingle(self, fail || function (err) { throw err; });
+  return this.promise().then(onSuccess, fail);
 
   function onSuccess() {
     return self._onFinish(success);

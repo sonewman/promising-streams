@@ -116,7 +116,7 @@ desc('TransformPromiseStream')
 .it('should handle error in transform promise', function (t) {
   var err = new Error('blerg');
   var transformPromise = tps(
-  function transform(chunk) {
+  function transform() {
     return Promise.reject(err);
   })
   .on('error', function (er) {
