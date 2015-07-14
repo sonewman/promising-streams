@@ -3,7 +3,7 @@ module.exports = ReadablePromiseStream
 var Readable = require('readable-stream').Readable
 var xtend = require('xtend')
 var consec = require('consec')
-var CreateEndPromise = require('./lib/end-promise')
+var MakePromise = require('./lib/make-promise');
 var CreateCatchPromise = require('./lib/catch-promise')
 
 if ('undefined' === typeof Promise)
@@ -108,8 +108,8 @@ ReadablePromiseStream.prototype.then = function (success, fail) {
 
   if (self._ended) return Promise.resolve().then(onSuccess)
   else if (self._error) return Promise.reject(self._error).catch(fail)
-  return CreateEndPromise(self, onSuccess, fail)
-  
+  return MakePromise(self, 'end', onSuccess, fail)
+
   function onSuccess() {
     return success(self._returnvalue)
   }

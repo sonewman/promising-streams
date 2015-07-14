@@ -95,7 +95,7 @@ desc('WritablePromiseStream')
     t.equals(er, err)
   })
 })
-.it('should return `_returnValue` on success', function (t) {
+.it('should return `data` on success', function (t) {
   var arr = ['a', 'b', 'c', 'd', 'e']
   var i = -1
 
@@ -109,11 +109,41 @@ desc('WritablePromiseStream')
       self.push(null)
     }
   })
-  .pipe(wps({ returnValue: [] }, function (chunk) {
-    return addToSrc(chunk.toString('utf8'), this._returnValue)
-  }))
+  .pipe(wps.obj())
   .then(function (res) {
-    t.eqls(res, arr)
-    t.equals(res, this._returnValue)
+    t.eqls(res.map(function (i) {
+      return i.toString('utf8');
+    }), arr)
+    t.equals(res, this.data)
   })
+})
+.it('should resolve promise if then called after promise has resolved', function (t) {
+  var arr = ['a', 'b', 'c', 'd', 'e']
+  var i = -1
+
+  var writable = new Readable({
+    read: function () {
+      var self = this
+
+      if ((i += 1) < arr.length)
+        return self.push(arr[i])
+
+      self.push(null)
+    }
+  })
+  .pipe(wps.obj());
+
+  return new Promise(function (resolve, reject) {
+    process.nextTick(function () {
+      writable.then(function (got) {
+        t.eqls(got.map(function (i) {
+          return i.toString('utf8');
+        }), arr)
+        resolve();
+      },
+      function (err) {
+        reject(err);
+      });
+    });
+  });
 })

@@ -1,22 +1,34 @@
 module.exports = exports = WritablePromiseStream;
 exports.sync = exports.Sync = WritableSyncPromiseStream;
-exports.obj = exports.Obj = WritablePromiseStreamObj;
+exports.race = exports.Race = WritableRacePromiseStream;
 
 var Writable = require('readable-stream').Writable;
 var xtend = require('xtend');
 var consec = require('consec');
-var MakePromise = require('./lib/make-promise');
+var MakePromise = require('./lib/finish-promise');
 var CreateCatchPromise = require('./lib/catch-promise');
-
-function addToSrc(d, src) {
-  return new Promise(function (resolve) {
-    src.push(d)
-    resolve()
-  })
-}
 
 if ('undefined' === typeof Promise)
   Promise = require('promise'); // eslint-disable-line no-undef
+
+function handleState(str) {
+  str.on('finish', onend);
+  function onend() {
+    if (!str._finished) str._finished = true;
+    cleanup();
+  }
+
+  str.on('error', onerror)
+  function onerror(err) {
+    if (!str._error) str._error = err;
+    cleanup();
+  }
+
+  function cleanup() {
+    str.removeListener('finish', onend);
+    str.removeListener('error', onerror);
+  }
+}
 
 function WritablePromiseStream(options, write) {
   if (!(this instanceof WritablePromiseStream))
@@ -38,39 +50,32 @@ function WritablePromiseStream(options, write) {
   if (write) this.__write = write;
   Writable.call(this, options);
 
-  this._done = false;
+  this._finished = false;
   this._error = null;
+  handleState(this);
 
-  if (options && 'data' in options)
-    this.data = options.data;
-  else
-    this.data = [];
-  
-  // state is added to the stream itself
-  // for internal usage
-  if (opts.state) this.state = opts.state;
+  this._ordered = options.ordered === false;
+
+  if (this._ordered) {
+    this._buffer = [];
+  }
+
+  this._sync = options.sync !== false;
+
+  if ('returnValue' in options)
+    this._returnValue = options.returnValue;
 }
 
 WritablePromiseStream.prototype = Object.create(Writable.prototype, {
   constructor: { value: WritablePromiseStream }
 });
 
-function WritablePromiseStreamObj(opts, cb) {
-  if ('function' === typeof opts) {
-    cb = opts;
-    opts = {};
-  }
-
-  opts = opts ? xtend(opts) : {};
-  opts.objectMode = true;
-  return new WritablePromiseStream(opts, cb);
-}
-
+WritablePromiseStream.prototype._buffer = null;
 
 // value returned from write finish promise
 // this allows values to be built up and accessed
 // at the end of it's use
-WritablePromiseStream.prototype.data = null;
+WritablePromiseStream.prototype._returnValue = undefined;
 
 function noop() {}
 
@@ -84,17 +89,31 @@ function isIterable(i) {
   return 'function' === typeof i.next
 }
 
-WritablePromiseStream.prototype._onWritePromise = function (promise, next) {
+function WriteWrap(promise) {
+  this.ended = false
+  this.promise = promise
+}
+
+WritablePromiseStream.prototype._onPromise = function (promise, next) {
   var self = this;
-  promise.catch(function (err) {
+
+  if (!self.__buffer)
+    self.__buffer = [];
+
+  var wrap = new WriteWrap(promise);
+
+  self.__buffer.push(wrap);
+  promise.then(function () {
+    var leader = self.__buffer[0];
+    if (leader && leader === wrap) {
+
+    }
+  },
+  function (err) {
     self.emit('error', err);
   });
   next();
 }
-
-WritablePromiseStream.prototype.__write = function defaultWrite(data) {
-  return addToSrc(data, this.data);
-};
 
 WritablePromiseStream.prototype._write = function (chunk, enc, next) {
   var doneNext = false;
@@ -112,7 +131,7 @@ WritablePromiseStream.prototype._write = function (chunk, enc, next) {
     promise = consec(promise);
 
   if (isPromise(promise))
-    return this._onWritePromise(promise, next_);
+    return this._onPromise(promise, next_);
 }
 
 function bindSingle(ctx, method) {
@@ -122,7 +141,7 @@ function bindSingle(ctx, method) {
 }
 
 WritablePromiseStream.prototype._onFinish = function (success) {
-  return success(this.data);
+  return success(this._returnValue);
 };
 
 WritablePromiseStream.prototype.then = function (success, fail) {
@@ -130,25 +149,27 @@ WritablePromiseStream.prototype.then = function (success, fail) {
   success = bindSingle(self, success);
   fail = fail && bindSingle(self, fail);
 
-  if (self._done)
+  if (self._finished)
     return Promise.resolve().then(onSuccess);
 
   else if (fail && self._error)
     return Promise.reject(self._error).catch(fail);
 
-  return MakePromise(self, 'finish', onSuccess, fail);
+  return MakePromise(self, onSuccess, fail);
 
   function onSuccess() {
     return self._onFinish(success);
   }
 }
 
+
 WritablePromiseStream.prototype.catch = function (fn) {
   fn = bindSingle(this, fn);
-  if (this._done) return Promise.resolve();
+  if (this._finished) return Promise.resolve();
   else if (this._error) return Promise.reject(this._error).catch(fn);
   return CreateCatchPromise(this, fn);
 }
+
 
 
 function WritableSyncPromiseStream(options, write) {
@@ -163,13 +184,36 @@ WritableSyncPromiseStream.prototype = Object.create(WritablePromiseStream.protot
 });
 
 WritableSyncPromiseStream.prototype._onFinish = function (success) {
-  return success(this.data);
+  return success(this._returnValue);
 };
 
-WritableSyncPromiseStream.prototype._onWritePromise = function (promise, next) {
+WritableSyncPromiseStream.prototype._onPromise = function (promise, next) {
   promise.then(function () {
     next();
   }, function (err) {
     next(err);
   });
+}
+
+function WritableRacePromiseStream(options, write) {
+  if (!(this instanceof WritableRacePromiseStream))
+    return new WritableRacePromiseStream(options, write);
+
+  WritablePromiseStream.call(options);
+}
+
+WritableRacePromiseStream.prototype = Object.create(WritablePromiseStream.prototype, {
+  constructor: { value: WritableRacePromiseStream }
+});
+
+WritableRacePromiseStream.prototype._onFinish = function (success) {
+  return success(this._returnValue);
+};
+
+WritableRacePromiseStream.prototype._onPromise = function (promise, next) {
+  var self = this;
+  promise.catch(function (err) {
+    self.emit('error', err);
+  });
+  next();
 }

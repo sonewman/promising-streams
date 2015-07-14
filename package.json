@@ -1,5 +1,5 @@
 {
-  "name": "a-streams-promise",
+  "name": "promising-streams",
   "version": "0.0.0",
   "description": "Streams with support for promise internals",
   "main": "index.js",
@@ -21,6 +21,7 @@
   },
   "homepage": "https://github.com/sonewman/a-streams-promise#readme",
   "dependencies": {
+    "bluebird": "^2.9.33",
     "consec": "^1.0.2",
     "macchiato": "^4.2.1",
     "promise": "^7.0.3",
