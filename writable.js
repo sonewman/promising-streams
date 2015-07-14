@@ -16,8 +16,8 @@ function addToSrc(d, src) {
 }
 
 function handleState(str) {
-  str.on('end', onend)
-  function onend() {
+  str.on('finish', onfinish)
+  function onfinish() {
     if (!str._done) str._done = true
     cleanup()
   }
@@ -29,7 +29,7 @@ function handleState(str) {
   }
 
   function cleanup() {
-    str.removeListener('end', onend)
+    str.removeListener('finish', onfinish)
     str.removeListener('error', onerror)
   }
 }

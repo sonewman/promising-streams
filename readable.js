@@ -115,7 +115,7 @@ ReadablePromiseStream.prototype.promise = function () {
 ReadablePromiseStream.prototype.then = function (success, fail) {
   var self = this;
   success = bindSingle(self, success);
-  fail = fail && bindSingle(self, fail);
+  fail = bindSingle(self, fail || function (err) { throw err; });
   return this.promise().then(onSuccess, fail);
 
   function onSuccess() {
