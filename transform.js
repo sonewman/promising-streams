@@ -99,14 +99,12 @@ function throttle(tr) {
   return throttle(tr);
 }
 
-TransformPromiseStream.prototype._onTransformPromise = function (promise, next) {
+TransformPromiseStream.prototype._onTransformPromise = function (promise, push, next) {
   var self = this;
   if (self._error) {
     next(self._error);
     return;
   }
-
-  self._pending += 1;
 
   if (!self.__buffer)
     self.__buffer = [];
@@ -116,34 +114,47 @@ TransformPromiseStream.prototype._onTransformPromise = function (promise, next) 
 
 
   promise.then(function checkNext(value) {
-    self._pending -= 1;
     wrap.ended = true;
     wrap.value = value;
+    push();
     throttle(self);
   },
   function (err) {
-    self._pending -= 1;
-    self._error = err;
-
-    process.nextTick(function () {
-      self.emit('error', err);
-    });
+    push(err);
   });
   next();
 }
 
+function onerror(tr, err) {
+  tr._error = err;
+  process.nextTick(function () {
+    tr.emit('error', err);
+  });
+}
+
 TransformPromiseStream.prototype._transform = function (chunk, enc, next) {
   var doneNext = false;
+  var self = this;
+  self._pending += 1;
 
   function next_(err, data) {
+    if (err) onerror(self, err);
     if (doneNext) return;
     doneNext = true;
 
-    if (err) next(err);
-    else next(null, data);
+    next(null, data);
   }
 
-  var promise = this.__transform(chunk, enc, next_);
+  function push(err, data) {
+    self._pending -= 1;
+    if (!err && data) self.push(data);
+    next_(err);
+  }
+
+  var promise = this.__transform(chunk, enc, function (err, data) {
+    self._pending -= 1;
+    next_(err, data);
+  });
 
   if (doneNext) return;
 
@@ -151,7 +162,7 @@ TransformPromiseStream.prototype._transform = function (chunk, enc, next) {
     promise = consec(promise);
 
   if (isPromise(promise))
-    this._onTransformPromise(promise, next_);
+    this._onTransformPromise(promise, push, next_);
 }
 
 TransformPromiseStream.prototype._onFlushPromise = function (promise, done) {
@@ -169,6 +180,10 @@ TransformPromiseStream.prototype._onFlushPromise = function (promise, done) {
     done(err);
   });
 };
+
+function canFlush(tr) {
+  return tr._finished || tr._pending === 0;
+}
 
 TransformPromiseStream.prototype._flush = function(done) {
   var isDone = false;
@@ -192,9 +207,10 @@ TransformPromiseStream.prototype._flush = function(done) {
     if (isPromise(promise))
       this._onFlushPromise(promise, next);
 
+  } else if (canFlush(this)) {
+    done(this._error);
   } else {
-    if (this._finished) done(this._error);
-    else this.__flushDone = done;
+    this.__flushDone = done;
   }
 };
 
@@ -283,9 +299,8 @@ TransformSyncPromiseStream.prototype.__next = function (next) {
   self.__write(p.data, p.enc, n);
 };
 
-TransformSyncPromiseStream.prototype._onTransformPromise = function (promise, next) {
+TransformSyncPromiseStream.prototype._onTransformPromise = function (promise, push, next) {
   var self = this;
-  self._pending += 1;
 
   promise.then(function checkNext(value) {
     self._pending -= 1;
@@ -318,19 +333,17 @@ TransformRacePromiseStream.prototype._onFinish = function (success) {
   return success(this.buffer);
 };
 
-TransformRacePromiseStream.prototype._onTransformPromise = function (promise, next) {
+TransformRacePromiseStream.prototype._onTransformPromise = function (promise, push, next) {
   var self = this;
 
-  self._pending += 1;
   promise.then(function checkNext(value) {
-    self.push(value);
-    self._pending -= 1;
+    push(null, value);
 
     if (self._pending === 0)
       self.push(null);
   },
   function (err) {
-    self.emit('error', err);
+    push(err);
   });
   next();
 }

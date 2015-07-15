@@ -22,15 +22,8 @@ function handleState(str) {
     cleanup()
   }
 
-  str.on('error', onerror)
-  function onerror(err) {
-    if (!str._error) str._error = err
-    cleanup()
-  }
-
   function cleanup() {
     str.removeListener('finish', onfinish)
-    str.removeListener('error', onerror)
   }
 }
 
@@ -64,6 +57,9 @@ function WritablePromiseStream(options, write) {
     this.data = options.data;
   else
     this.data = [];
+
+  handleState(this);
+  this._error = null;
 
   // state is added to the stream itself
   // for internal usage
@@ -106,20 +102,26 @@ function isIterable(i) {
 WritablePromiseStream.prototype._onWritePromise = function (promise, next) {
   var self = this;
   promise.catch(function (err) {
-    self.emit('error', err);
+    self._error = err;
+    process.nextTick(function () {
+      self.emit('error', err)
+    });
   });
   next();
 }
 
 WritablePromiseStream.prototype.__write = function defaultWrite(data) {
+//  console.log(data, this.data);
   return addToSrc(data, this.data);
 };
 
 WritablePromiseStream.prototype._write = function (chunk, enc, next) {
   var doneNext = false;
+  var self = this;
 
   function next_(err) {
     if (doneNext) return;
+    self._error = err;
     doneNext = true;
 
     next(err);

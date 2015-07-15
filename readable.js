@@ -16,15 +16,8 @@ function handleState(str) {
     cleanup()
   }
 
-  str.on('error', onerror)
-  function onerror(err) {
-    if (!str._error) str._error = err
-    cleanup()
-  }
-
   function cleanup() {
     str.removeListener('end', onend)
-    str.removeListener('error', onerror)
   }
 }
 
@@ -87,11 +80,13 @@ ReadablePromiseStream.prototype._read = function (n) {
   if (isPromise(r)) {
     r.then(function (data) {
       self.push(data)
-    })
-
-    r.catch(function (err) {
-      self.emit('error', err)
-    })
+    },
+    function (err) {
+      self._error = err;
+      process.nextTick(function () {
+        self.emit('error', err)
+      });
+    });
   }
 }
 
@@ -109,7 +104,6 @@ ReadablePromiseStream.prototype.promise = function () {
     return Promise.reject(this._error);
 
   return MakePromise(this, 'end');
-};
 };
 
 ReadablePromiseStream.prototype.then = function (success, fail) {

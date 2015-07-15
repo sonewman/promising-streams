@@ -66,6 +66,7 @@ desc('ReadablePromiseStream')
   var notcalled = true
   s.then(function () {
     notcalled = false
+    t.fail();
   },
   function (er) {
     t.equals(er, err)
