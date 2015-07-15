@@ -81,6 +81,9 @@ function WritablePromiseStreamObj(opts, cb) {
   return new WritablePromiseStream(opts, cb);
 }
 
+WritablePromiseStream.prototype._pending = 0;
+
+WritablePromiseStream.prototype._ending = false;
 
 // value returned from write finish promise
 // this allows values to be built up and accessed
@@ -99,42 +102,91 @@ function isIterable(i) {
   return 'function' === typeof i.next
 }
 
-WritablePromiseStream.prototype._onWritePromise = function (promise, next) {
+WritablePromiseStream.prototype._onWritePromise = function (promise, complete, next) {
   var self = this;
-  promise.catch(function (err) {
+
+  promise.then(complete, function (err) {
     self._error = err;
-    process.nextTick(function () {
-      self.emit('error', err)
-    });
+    complete(err);
   });
   next();
 }
 
+WritablePromiseStream.prototype.write_ = WritablePromiseStream.prototype.write;
+WritablePromiseStream.prototype.write = function (data, enc, cb) {
+  if (this._ending === true) {
+    throw new Error('Cannot write after end WritablePromiseStream');
+  }
+
+  return this.write_(data, enc, cb);
+};
+
 WritablePromiseStream.prototype.__write = function defaultWrite(data) {
-//  console.log(data, this.data);
   return addToSrc(data, this.data);
 };
+
+function onerror(tr, err) {
+  tr._error = err;
+  process.nextTick(function () {
+    tr.emit('error', err);
+  });
+}
 
 WritablePromiseStream.prototype._write = function (chunk, enc, next) {
   var doneNext = false;
   var self = this;
+  self._pending += 1;
 
   function next_(err) {
-    if (doneNext) return;
-    self._error = err;
+    if (err) onerror(self, err);
+    if (doneNext) {
+      if (self._ending) {
+        self._end();
+      }
+      return;
+    }
     doneNext = true;
 
     next(err);
+
+    if (!err && self._ending) {
+      self._end();
+    }
   }
 
-  var promise = this.__write(chunk, enc, next_);
+  function complete(err) {
+    self._pending -= 1;
+    next_(err);
+  }
+
+  var promise = this.__write(chunk, enc, function (err) {
+    self._pending -= 1;
+    next_(err);
+  });
+
+  if (doneNext) return;
 
   if (isIterable(promise))
     promise = consec(promise);
 
   if (isPromise(promise))
-    return this._onWritePromise(promise, next_);
+    return this._onWritePromise(promise, complete, next_);
 }
+
+WritablePromiseStream.prototype._end = WritablePromiseStream.prototype.end;
+
+WritablePromiseStream.prototype.end = function (data, enc, cb) {
+  if (this._ending === true) {
+    throw new Error('Cannot write after end WritablePromiseStream');
+  }
+
+  this._ending = true;
+  if (this._pending === 0) {
+    return this._end(data, enc, cb);
+  }
+
+  return data != null ? this.write_(data, enc, cb) : false;
+};
 
 function bindSingle(ctx, method) {
   return function (arg) {
