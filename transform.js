@@ -65,6 +65,8 @@ TransformPromiseStream.prototype = Object.create(Transform.prototype, {
 
 TransformPromiseStream.prototype._pending = 0;
 
+TransformPromiseStream.prototype._ending = false;
+
 function noop() {}
 
 TransformPromiseStream.prototype.__transform = noop;
@@ -139,10 +141,17 @@ TransformPromiseStream.prototype._transform = function (chunk, enc, next) {
 
   function next_(err, data) {
     if (err) onerror(self, err);
-    if (doneNext) return;
+    if (doneNext) {
+      if (!err && self._ending) {
+        self._end();
+      }
+      return;
+    }
     doneNext = true;
 
     next(null, data);
+
+    if (!err && self._ending) self._end();
   }
 
   function push(err, data) {
@@ -164,6 +173,21 @@ TransformPromiseStream.prototype._transform = function (chunk, enc, next) {
   if (isPromise(promise))
     this._onTransformPromise(promise, push, next_);
 }
+
+TransformPromiseStream.prototype._end = TransformPromiseStream.prototype.end;
+
+TransformPromiseStream.prototype.end = function (data, enc, cb) {
+  if (this._ending === true) {
+    throw new Error('Cannot write after end TransformPromiseStream');
+  }
+
+  this._ending = true;
+  if (this._pending === 0) {
+    return this._end(data, enc, cb);
+  }
+
+  return data != null ? this.write_(data, enc, cb) : false;
+};
 
 TransformPromiseStream.prototype._onFlushPromise = function (promise, done) {
   var self = this;
@@ -224,36 +248,32 @@ TransformPromiseStream.prototype._onFinish = function (success) {
   return success(this.buffer);
 };
 
+TransformPromiseStream.prototype.promise = function () {
+  if (this._done)
+    return Promise.resolve();
+
+  else if (this._error)
+    return Promise.reject(this._error);
+
+  return MakePromise(this, 'finish');
+};
+
 TransformPromiseStream.prototype.then = function (success, fail) {
   var self = this;
   success = bindSingle(self, success);
-  fail = fail && bindSingle(self, fail);
-
-  if (self._finished)
-    return Promise.resolve().then(onSuccess);
-
-  else if (fail && self._error)
-    return Promise.reject(self._error).catch(fail);
-
-  return MakePromise(self, 'end', onSuccess, fail);
+  fail = bindSingle(self, fail || function (err) { throw err; });
+  return this.promise().then(onSuccess, fail);
 
   function onSuccess() {
     return self._onFinish(success);
   }
 }
 
-
 TransformPromiseStream.prototype.catch = function (fn) {
   fn = bindSingle(this, fn);
-  if (this._finished) return Promise.resolve();
+  if (this._done) return Promise.resolve();
   else if (this._error) return Promise.reject(this._error).catch(fn);
   return CreateCatchPromise(this, fn);
-}
-
-function WriteBuffer(data, enc, cb) {
-  this.data = data;
-  this.enc = enc;
-  this.cb = cb;
 }
 
 function TransformSyncPromiseStream(options, transform) {
@@ -276,6 +296,11 @@ TransformSyncPromiseStream.prototype._onFinish = function (success) {
 
 TransformSyncPromiseStream.prototype.__write = TransformSyncPromiseStream.prototype._write;
 
+function WriteBuffer(data, enc, cb) {
+  this.data = data;
+  this.enc = enc;
+  this.cb = cb;
+}
 
 TransformSyncPromiseStream.prototype._write = function (data, enc, cb) {
   if (this._waiting) {
