@@ -147,3 +147,33 @@ desc('WritablePromiseStream')
     });
   });
 })
+.it('should resolve promise data if data is ready', function (t) {
+  var arr = ['a', 'b', 'c', 'd', 'e']
+  var i = -1
+
+  var writable = new Readable({
+    read: function () {
+      var self = this
+
+      if ((i += 1) < arr.length)
+        return self.push(arr[i])
+
+      self.push(null)
+    }
+  })
+  .pipe(wps.obj());
+
+  return new Promise(function (resolve, reject) {
+    process.nextTick(function () {
+      writable.promise().then(function (got) {
+        t.eqls(got.map(function (i) {
+          return i.toString('utf8');
+        }), arr)
+        resolve();
+      },
+      function (err) {
+        reject(err);
+      });
+    });
+  });
+})

@@ -149,9 +149,7 @@ WritablePromiseStream.prototype._write = function (chunk, enc, next) {
 
     next(err);
 
-    if (!err && self._ending) {
-      self._end();
-    }
+    if (!err && self._ending) self._end();
   }
 
   function complete(err) {
@@ -159,10 +157,7 @@ WritablePromiseStream.prototype._write = function (chunk, enc, next) {
     next_(err);
   }
 
-  var promise = this.__write(chunk, enc, function (err) {
-    self._pending -= 1;
-    next_(err);
-  });
+  var promise = this.__write(chunk, enc, complete);
 
   if (doneNext) return;
 
@@ -194,29 +189,29 @@ function bindSingle(ctx, method) {
   }
 }
 
-WritablePromiseStream.prototype._onFinish = function (success) {
-  return success(this.data);
+WritablePromiseStream.prototype._onFinish = function (err) {
+  return err || this.data;
 };
 
 WritablePromiseStream.prototype.promise = function () {
-  if (this._done)
-    return Promise.resolve();
+  var self = this;
 
-  else if (this._error)
-    return Promise.reject(this._error);
+  if (self._done)
+    return Promise.resolve(self.data);
 
-  return MakePromise(this, 'finish');
+  else if (self._error)
+    return Promise.reject(self._error);
+
+  return MakePromise(self, 'finish', function (err) {
+    return self._onFinish(err);
+  });
 };
 
 WritablePromiseStream.prototype.then = function (success, fail) {
   var self = this;
   success = bindSingle(self, success);
   fail = bindSingle(self, fail || function (err) { throw err; });
-  return this.promise().then(onSuccess, fail);
-
-  function onSuccess() {
-    return self._onFinish(success);
-  }
+  return this.promise().then(success, fail);
 }
 
 WritablePromiseStream.prototype.catch = function (fn) {
