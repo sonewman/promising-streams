@@ -118,8 +118,8 @@ TransformPromiseStream.prototype._onTransformPromise = function (promise, push, 
   promise.then(function checkNext(value) {
     wrap.ended = true;
     wrap.value = value;
-    push();
     throttle(self);
+    push();
   },
   function (err) {
     push(err);
@@ -142,7 +142,7 @@ TransformPromiseStream.prototype._transform = function (chunk, enc, next) {
   function next_(err, data) {
     if (err) onerror(self, err);
     if (doneNext) {
-      if (!err && self._ending) {
+      if (!err && self._pending === 0 && self._ending) {
         self._end();
       }
       return;
@@ -249,7 +249,7 @@ TransformPromiseStream.prototype._onFinish = function (success) {
 };
 
 TransformPromiseStream.prototype.promise = function () {
-  if (this._done)
+  if (this._finished)
     return Promise.resolve();
 
   else if (this._error)
@@ -271,7 +271,7 @@ TransformPromiseStream.prototype.then = function (success, fail) {
 
 TransformPromiseStream.prototype.catch = function (fn) {
   fn = bindSingle(this, fn);
-  if (this._done) return Promise.resolve();
+  if (this._finished) return Promise.resolve();
   else if (this._error) return Promise.reject(this._error).catch(fn);
   return CreateCatchPromise(this, fn);
 }
