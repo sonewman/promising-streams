@@ -135,6 +135,9 @@ function onerror(tr, err) {
 WritablePromiseStream.prototype._write = function (chunk, enc, next) {
   var doneNext = false;
   var self = this;
+  if (self._error) {
+    return;
+  }
   self._pending += 1;
 
   function next_(err) {
