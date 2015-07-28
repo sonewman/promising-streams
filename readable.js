@@ -1,4 +1,5 @@
-module.exports = ReadablePromiseStream
+module.exports = exports = ReadablePromiseStream
+exports.obj = exports.Obj = ReadablePromiseStreamObj;
 
 var Readable = require('readable-stream').Readable
 var xtend = require('xtend')
@@ -48,6 +49,17 @@ function ReadablePromiseStream(options, read) {
 
   if ('returnValue' in options)
     this._returnValue = options.returnValue
+}
+
+function ReadablePromiseStreamObj(opts, read) {
+  if ('function' === typeof opts) {
+    read = opts;
+    opts = {};
+  }
+
+  opts = opts ? xtend(opts) : {};
+  opts.objectMode = true;
+  return new ReadablePromiseStream(opts, read);
 }
 
 ReadablePromiseStream.prototype = Object.create(Readable.prototype, {

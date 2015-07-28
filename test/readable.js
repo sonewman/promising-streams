@@ -97,3 +97,26 @@ desc('ReadablePromiseStream')
     }
   }))
 })
+.it('should have easy helper for obj streams', function (t) {
+  var arr = [{ a: 1}, { a: 2 }, { a: 3 }]
+  var i = -1
+  var got = []
+
+  rps.obj(function () {
+    if ((i += 1) < arr.length)
+      return Promise.resolve(arr[i])
+
+    return Promise.resolve(null)
+  })
+  .pipe(new Writable({
+    objectMode: true,
+    write: function (d, enc, next) {
+      got.push(d)
+      next()
+    }
+  }))
+  .on('finish', function () {
+    t.eqls(arr, got)
+    t.end()
+  })
+})
