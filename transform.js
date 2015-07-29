@@ -6,8 +6,7 @@ exports.obj = exports.Obj = TransformPromiseStreamObj;
 var Transform = require('readable-stream').Transform;
 var xtend = require('xtend');
 var consec = require('consec');
-var MakePromise = require('./lib/make-promise');
-var CreateCatchPromise = require('./lib/catch-promise');
+var util = require('./lib/util');
 
 if ('undefined' === typeof Promise)
   Promise = require('promise'); // eslint-disable-line no-undef
@@ -67,17 +66,7 @@ TransformPromiseStream.prototype._pending = 0;
 
 TransformPromiseStream.prototype._ending = false;
 
-function noop() {}
-
-TransformPromiseStream.prototype.__transform = noop;
-
-function isPromise(p) {
-  return 'function' === typeof p.then && 'function' === typeof p.catch;
-}
-
-function isIterable(i) {
-  return 'function' === typeof i.next;
-}
+TransformPromiseStream.prototype.__transform = util.noop;
 
 function TransformWrap(promise) {
   this.ended = false;
@@ -171,10 +160,10 @@ TransformPromiseStream.prototype._transform = function (chunk, enc, next) {
 
   if (doneNext) return;
 
-  if (isIterable(promise))
+  if (util.isIterable(promise))
     promise = consec(promise);
 
-  if (isPromise(promise))
+  if (util.isPromise(promise))
     this._onTransformPromise(promise, push, next_);
 }
 
@@ -229,10 +218,10 @@ TransformPromiseStream.prototype._flush = function(done) {
 
     if (isDone) return;
 
-    if (isIterable(promise))
+    if (util.isIterable(promise))
       promise = consec(promise);
 
-    if (isPromise(promise))
+    if (util.isPromise(promise))
       this._onFlushPromise(promise, next);
 
   } else if (canFlush(this)) {
@@ -252,15 +241,16 @@ TransformPromiseStream.prototype._onFinish = function (success) {
   return success(this.buffer);
 };
 
-TransformPromiseStream.prototype.promise = function () {
+TransformPromiseStream.prototype.done = function () {
   if (this._finished)
     return Promise.resolve();
 
   else if (this._error)
     return Promise.reject(this._error);
 
-  return MakePromise(this, 'finish');
+  return util.MakePromise(this, 'finish');
 };
+TransformPromiseStream.prototype.promise = TransformPromiseStream.prototype.done;
 
 TransformPromiseStream.prototype.then = function (success, fail) {
   var self = this;
@@ -277,7 +267,7 @@ TransformPromiseStream.prototype.catch = function (fn) {
   fn = bindSingle(this, fn);
   if (this._finished) return Promise.resolve();
   else if (this._error) return Promise.reject(this._error).catch(fn);
-  return CreateCatchPromise(this, fn);
+  return util.CreateCatchPromise(this, fn);
 }
 
 function TransformSyncPromiseStream(options, transform) {

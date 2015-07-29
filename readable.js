@@ -4,8 +4,7 @@ exports.obj = exports.Obj = ReadablePromiseStreamObj;
 var Readable = require('readable-stream').Readable
 var xtend = require('xtend')
 var consec = require('consec')
-var MakePromise = require('./lib/make-promise');
-var CreateCatchPromise = require('./lib/catch-promise')
+var util = require('./lib/util');
 
 if ('undefined' === typeof Promise)
   Promise = require('Promise') // eslint-disable-line no-undef
@@ -71,25 +70,15 @@ ReadablePromiseStream.prototype = Object.create(Readable.prototype, {
 // at the end of it's use
 ReadablePromiseStream.prototype._returnValue = undefined
 
-function noop() {}
-
-ReadablePromiseStream.prototype.__read = noop
-
-function isPromise(p) {
-  return 'function' === typeof p.then && 'function' === typeof p.catch
-}
-
-function isIterable(i) {
-  return 'function' === typeof i.next
-}
+ReadablePromiseStream.prototype.__read = util.noop
 
 ReadablePromiseStream.prototype._read = function (n) {
   var self = this
   var r = self.__read(n)
 
-  if (isIterable(r)) r = consec(r)
+  if (util.isIterable(r)) r = consec(r)
 
-  if (isPromise(r)) {
+  if (util.isPromise(r)) {
     r.then(function (data) {
       self.push(data)
     },
@@ -108,21 +97,22 @@ function bindSingle(ctx, method) {
   }
 }
 
-ReadablePromiseStream.prototype.promise = function () {
+ReadablePromiseStream.prototype.done = function () {
   if (this._done)
     return Promise.resolve()
 
   else if (this._error)
     return Promise.reject(this._error);
 
-  return MakePromise(this, 'end');
+  return util.MakePromise(this, 'end');
 };
+ReadablePromiseStream.prototype.promise = ReadablePromiseStream.prototype.done;
 
 ReadablePromiseStream.prototype.then = function (success, fail) {
   var self = this;
   success = bindSingle(self, success);
   fail = bindSingle(self, fail || function (err) { throw err; });
-  return this.promise().then(onSuccess, fail);
+  return this.done().then(onSuccess, fail);
 
   function onSuccess() {
     return success(self._returnvalue)
@@ -132,5 +122,5 @@ ReadablePromiseStream.prototype.then = function (success, fail) {
 ReadablePromiseStream.prototype.catch = function (fn) {
   if (this._ended) return Promise.resolve()
   else if (this._error) return Promise.reject(this._error).catch(fn)
-  return CreateCatchPromise(this, fn)
+  return util.CreateCatchPromise(this, fn)
 }

@@ -1,138 +1,162 @@
-module.exports = exports = WritablePromiseStream;
-exports.sync = exports.Sync = WritableSyncPromiseStream;
-exports.race = exports.Race = WritableRacePromiseStream;
+module.exports = exports = DuplexPromiseStream;
+exports.sync = exports.Sync = DuplexSyncPromiseStream;
+exports.obj = exports.Obj = DuplexPromiseStreamObj;
 
-var Writable = require('readable-stream').Writable;
+var Duplex = require('readable-stream').Duplex;
 var xtend = require('xtend');
 var consec = require('consec');
-var MakePromise = require('./lib/finish-promise');
-var CreateCatchPromise = require('./lib/catch-promise');
+var WritablePromiseStream = require('./writable');
+var ReadablePromiseStream = require('./readable');
+var util = require('./lib/util');
+
+var CreateCatchPromise = util.CreateCatchPromise;
+
+function addToSrc(d, src) {
+  return new Promise(function (resolve) {
+    src.push(d)
+    resolve()
+  })
+}
+
+function handleState(str) {
+  str.on('finish', onfinish)
+  function onfinish() {
+    if (!str._done) str._done = true
+    cleanup()
+  }
+
+  function cleanup() {
+    str.removeListener('finish', onfinish)
+  }
+}
 
 if ('undefined' === typeof Promise)
   Promise = require('promise'); // eslint-disable-line no-undef
 
-function handleState(str) {
-  str.on('finish', onend);
-  function onend() {
-    if (!str._finished) str._finished = true;
-    cleanup();
-  }
-
-  str.on('error', onerror)
-  function onerror(err) {
-    if (!str._error) str._error = err;
-    cleanup();
-  }
-
-  function cleanup() {
-    str.removeListener('finish', onend);
-    str.removeListener('error', onerror);
-  }
-}
-
-function WritablePromiseStream(options, write) {
-  if (!(this instanceof WritablePromiseStream))
-    return new WritablePromiseStream(options, write);
+function DuplexPromiseStream(options, read, write) {
+  if (!(this instanceof DuplexPromiseStream))
+    return new DuplexPromiseStream(options, read, write);
 
   if ('function' === typeof options) {
-    write = options;
+    read = write;
+    read = options;
     options = {};
   }
-
-  var opts = options ? xtend(options) : {};
-  write = write || opts.write;
-
-  if (opts.write) {
-    if (!write) write = opts.write;
-    opts.write = null;
-  }
-
-  if (write) this.__write = write;
-  Writable.call(this, options);
-
-  this._finished = false;
-  this._error = null;
-  handleState(this);
-
-  this._ordered = options.ordered === false;
-
-  if (this._ordered) {
-    this._buffer = [];
-  }
-
-  this._sync = options.sync !== false;
-
-  if ('returnValue' in options)
-    this._returnValue = options.returnValue;
+  
+  ReadablePromiseStream.call(this, options, read);
+  WritablePromiseStream.call(this, options, write);
 }
 
-WritablePromiseStream.prototype = Object.create(Writable.prototype, {
-  constructor: { value: WritablePromiseStream }
+DuplexPromiseStream.prototype = Object.create(Duplex.prototype, {
+  constructor: { value: DuplexPromiseStream }
 });
 
-WritablePromiseStream.prototype._buffer = null;
+function DuplexPromiseStreamObj(opts, read, write) {
+  if ('function' === typeof opts) {
+    write = read;
+    read = opts;
+    opts = {};
+  }
+
+  opts = opts ? xtend(opts) : {};
+  opts.objectMode = true;
+  return new DuplexPromiseStream(opts, read, write);
+}
+
+DuplexPromiseStream.prototype._pending = 0;
+
+DuplexPromiseStream.prototype._ending = false;
 
 // value returned from write finish promise
 // this allows values to be built up and accessed
 // at the end of it's use
-WritablePromiseStream.prototype._returnValue = undefined;
+DuplexPromiseStream.prototype.data = null;
 
-function noop() {}
+DuplexPromiseStream.prototype.__write = util.noop;
 
-WritablePromiseStream.prototype.__write = noop;
-
-function isPromise(p) {
-  return 'function' === typeof p.then && 'function' === typeof p.catch
-}
-
-function isIterable(i) {
-  return 'function' === typeof i.next
-}
-
-function WriteWrap(promise) {
-  this.ended = false
-  this.promise = promise
-}
-
-WritablePromiseStream.prototype._onPromise = function (promise, next) {
+DuplexPromiseStream.prototype._onWritePromise = function (promise, complete, next) {
   var self = this;
 
-  if (!self.__buffer)
-    self.__buffer = [];
-
-  var wrap = new WriteWrap(promise);
-
-  self.__buffer.push(wrap);
-  promise.then(function () {
-    var leader = self.__buffer[0];
-    if (leader && leader === wrap) {
-
-    }
-  },
-  function (err) {
-    self.emit('error', err);
+  promise.then(complete, function (err) {
+    self._error = err;
+    complete(err);
   });
   next();
 }
 
-WritablePromiseStream.prototype._write = function (chunk, enc, next) {
+DuplexPromiseStream.prototype.write_ = DuplexPromiseStream.prototype.write;
+DuplexPromiseStream.prototype.write = function (data, enc, cb) {
+  if (this._ending === true) {
+    throw new Error('Cannot write after end DuplexPromiseStream');
+  }
+
+  return this.write_(data, enc, cb);
+};
+
+DuplexPromiseStream.prototype.__write = function defaultWrite(data) {
+  return addToSrc(data, this.data);
+};
+
+function onerror(tr, err) {
+  tr._error = err;
+  process.nextTick(function () {
+    tr.emit('error', err);
+  });
+}
+
+DuplexPromiseStream.prototype._write = function (chunk, enc, next) {
   var doneNext = false;
+  var self = this;
+  if (self._error) {
+    return;
+  }
+  self._pending += 1;
 
   function next_(err) {
-    if (doneNext) return;
+    if (err) onerror(self, err);
+    if (doneNext) {
+      if (self._ending) {
+        self._end();
+      }
+      return;
+    }
     doneNext = true;
 
     next(err);
+
+    if (!err && self._ending) self._end();
   }
 
-  var promise = this.__write(chunk, enc, next_);
+  function complete(err) {
+    self._pending -= 1;
+    next_(err);
+  }
 
-  if (isIterable(promise))
+  var promise = this.__write(chunk, enc, complete);
+
+  if (doneNext) return;
+
+  if (util.isIterable(promise))
     promise = consec(promise);
 
-  if (isPromise(promise))
-    return this._onPromise(promise, next_);
+  if (util.isPromise(promise))
+    this._onWritePromise(promise, complete, next_);
 }
+
+DuplexPromiseStream.prototype._end = DuplexPromiseStream.prototype.end;
+
+DuplexPromiseStream.prototype.end = function (data, enc, cb) {
+  if (this._ending === true) {
+    throw new Error('Cannot write after end DuplexPromiseStream');
+  }
+
+  this._ending = true;
+  if (this._pending === 0) {
+    return this._end(data, enc, cb);
+  }
+
+  return data != null ? this.write_(data, enc, cb) : false;
+};
 
 function bindSingle(ctx, method) {
   return function (arg) {
@@ -140,80 +164,59 @@ function bindSingle(ctx, method) {
   }
 }
 
-WritablePromiseStream.prototype._onFinish = function (success) {
-  return success(this._returnValue);
+DuplexPromiseStream.prototype._onFinish = function (err) {
+  return err || this.data;
 };
 
-WritablePromiseStream.prototype.then = function (success, fail) {
+DuplexPromiseStream.prototype.done = function () {
+  var self = this;
+
+  if (self._done)
+    return Promise.resolve(self.data);
+
+  else if (self._error)
+    return Promise.reject(self._error);
+
+  return util.MakePromise(self, 'finish', function (err) {
+    return self._onFinish(err);
+  });
+};
+DuplexPromiseStream.prototype.promise = DuplexPromiseStream.prototype.done;
+
+DuplexPromiseStream.prototype.then = function (success, fail) {
   var self = this;
   success = bindSingle(self, success);
-  fail = fail && bindSingle(self, fail);
-
-  if (self._finished)
-    return Promise.resolve().then(onSuccess);
-
-  else if (fail && self._error)
-    return Promise.reject(self._error).catch(fail);
-
-  return MakePromise(self, onSuccess, fail);
-
-  function onSuccess() {
-    return self._onFinish(success);
-  }
+  fail = bindSingle(self, fail || function (err) { throw err; });
+  return this.done().then(success, fail);
 }
 
-
-WritablePromiseStream.prototype.catch = function (fn) {
+DuplexPromiseStream.prototype.catch = function (fn) {
   fn = bindSingle(this, fn);
-  if (this._finished) return Promise.resolve();
+  if (this._done) return Promise.resolve();
   else if (this._error) return Promise.reject(this._error).catch(fn);
   return CreateCatchPromise(this, fn);
 }
 
 
+function DuplexSyncPromiseStream(options, read, write) {
+  if (!(this instanceof DuplexSyncPromiseStream))
+    return new DuplexSyncPromiseStream(options, read, write);
 
-function WritableSyncPromiseStream(options, write) {
-  if (!(this instanceof WritableSyncPromiseStream))
-    return new WritableSyncPromiseStream(options, write);
-
-  WritablePromiseStream.call(options);
+  DuplexPromiseStream.call(options);
 }
 
-WritableSyncPromiseStream.prototype = Object.create(WritablePromiseStream.prototype, {
-  constructor: { value: WritableSyncPromiseStream }
+DuplexSyncPromiseStream.prototype = Object.create(DuplexPromiseStream.prototype, {
+  constructor: { value: DuplexSyncPromiseStream }
 });
 
-WritableSyncPromiseStream.prototype._onFinish = function (success) {
-  return success(this._returnValue);
+DuplexSyncPromiseStream.prototype._onFinish = function (success) {
+  return success(this.data);
 };
 
-WritableSyncPromiseStream.prototype._onPromise = function (promise, next) {
+DuplexSyncPromiseStream.prototype._onWritePromise = function (promise, next) {
   promise.then(function () {
     next();
   }, function (err) {
     next(err);
   });
-}
-
-function WritableRacePromiseStream(options, write) {
-  if (!(this instanceof WritableRacePromiseStream))
-    return new WritableRacePromiseStream(options, write);
-
-  WritablePromiseStream.call(options);
-}
-
-WritableRacePromiseStream.prototype = Object.create(WritablePromiseStream.prototype, {
-  constructor: { value: WritableRacePromiseStream }
-});
-
-WritableRacePromiseStream.prototype._onFinish = function (success) {
-  return success(this._returnValue);
-};
-
-WritableRacePromiseStream.prototype._onPromise = function (promise, next) {
-  var self = this;
-  promise.catch(function (err) {
-    self.emit('error', err);
-  });
-  next();
 }

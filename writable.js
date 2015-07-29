@@ -5,8 +5,7 @@ exports.obj = exports.Obj = WritablePromiseStreamObj;
 var Writable = require('readable-stream').Writable;
 var xtend = require('xtend');
 var consec = require('consec');
-var MakePromise = require('./lib/make-promise');
-var CreateCatchPromise = require('./lib/catch-promise');
+var util = require('./lib/util');
 
 function addToSrc(d, src) {
   return new Promise(function (resolve) {
@@ -90,17 +89,7 @@ WritablePromiseStream.prototype._ending = false;
 // at the end of it's use
 WritablePromiseStream.prototype.data = null;
 
-function noop() {}
-
-WritablePromiseStream.prototype.__write = noop;
-
-function isPromise(p) {
-  return 'function' === typeof p.then && 'function' === typeof p.catch
-}
-
-function isIterable(i) {
-  return 'function' === typeof i.next
-}
+WritablePromiseStream.prototype.__write = util.noop;
 
 WritablePromiseStream.prototype._onWritePromise = function (promise, complete, next) {
   var self = this;
@@ -164,11 +153,11 @@ WritablePromiseStream.prototype._write = function (chunk, enc, next) {
 
   if (doneNext) return;
 
-  if (isIterable(promise))
+  if (util.isIterable(promise))
     promise = consec(promise);
 
-  if (isPromise(promise))
-    return this._onWritePromise(promise, complete, next_);
+  if (util.isPromise(promise))
+    this._onWritePromise(promise, complete, next_);
 }
 
 WritablePromiseStream.prototype._end = WritablePromiseStream.prototype.end;
@@ -196,7 +185,7 @@ WritablePromiseStream.prototype._onFinish = function (err) {
   return err || this.data;
 };
 
-WritablePromiseStream.prototype.promise = function () {
+WritablePromiseStream.prototype.done = function () {
   var self = this;
 
   if (self._done)
@@ -205,23 +194,24 @@ WritablePromiseStream.prototype.promise = function () {
   else if (self._error)
     return Promise.reject(self._error);
 
-  return MakePromise(self, 'finish', function (err) {
+  return util.MakePromise(self, 'finish', function (err) {
     return self._onFinish(err);
   });
 };
+WritablePromiseStream.prototype.promise = WritablePromiseStream.prototype.done;
 
 WritablePromiseStream.prototype.then = function (success, fail) {
   var self = this;
   success = bindSingle(self, success);
   fail = bindSingle(self, fail || function (err) { throw err; });
-  return this.promise().then(success, fail);
+  return this.done().then(success, fail);
 }
 
 WritablePromiseStream.prototype.catch = function (fn) {
   fn = bindSingle(this, fn);
   if (this._done) return Promise.resolve();
   else if (this._error) return Promise.reject(this._error).catch(fn);
-  return CreateCatchPromise(this, fn);
+  return util.CreateCatchPromise(this, fn);
 }
 
 
