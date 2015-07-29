@@ -121,6 +121,14 @@ function onerror(tr, err) {
   });
 }
 
+function callWriteSafe(stream, args, cb) {
+  try {
+    cb(null, stream.__write(args[0], args[1], args[2]));
+  } catch (err) {
+    cb(err);
+  }
+}
+
 WritablePromiseStream.prototype._write = function (chunk, enc, next) {
   var doneNext = false;
   var self = this;
@@ -149,15 +157,21 @@ WritablePromiseStream.prototype._write = function (chunk, enc, next) {
     next_(err);
   }
 
-  var promise = this.__write(chunk, enc, complete);
+  var result;
+  function onwrite(err, r) {
+    if (err) {
+      self.emit('error', err);
+    } else {
+      result = util.isIterable(r) ? consec(r) : r;
+    }
+  }
+
+  callWriteSafe(this, [chunk, enc, complete], onwrite);
 
   if (doneNext) return;
 
-  if (util.isIterable(promise))
-    promise = consec(promise);
-
-  if (util.isPromise(promise))
-    this._onWritePromise(promise, complete, next_);
+  if (util.isPromise(result))
+    this._onWritePromise(result, complete, next_);
 }
 
 WritablePromiseStream.prototype._end = WritablePromiseStream.prototype.end;

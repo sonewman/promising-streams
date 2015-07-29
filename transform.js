@@ -123,6 +123,14 @@ function onerror(tr, err) {
   });
 }
 
+function callTransformSafe(stream, args, cb) {
+  try {
+    cb(null, stream.__transform(args[0], args[1], args[2]));
+  } catch (err) {
+    cb(err);
+  }
+}
+
 TransformPromiseStream.prototype._transform = function (chunk, enc, next) {
   var doneNext = false;
   var self = this;
@@ -153,18 +161,26 @@ TransformPromiseStream.prototype._transform = function (chunk, enc, next) {
     next_(err);
   }
 
-  var promise = this.__transform(chunk, enc, function (err, data) {
+  function complete(err, data) {
     self._pending -= 1;
     next_(err, data);
-  });
+  }
+
+  var result;
+  function ontransform(err, r) {
+    if (err) {
+      self.emit('error', err);
+    } else {
+      result = util.isIterable(r) ? consec(r) : r;
+    }
+  }
+
+  callTransformSafe(this, [chunk, enc, complete], ontransform);
 
   if (doneNext) return;
 
-  if (util.isIterable(promise))
-    promise = consec(promise);
-
-  if (util.isPromise(promise))
-    this._onTransformPromise(promise, push, next_);
+  if (util.isPromise(result))
+    this._onTransformPromise(result, push, next_);
 }
 
 TransformPromiseStream.prototype._end = TransformPromiseStream.prototype.end;
@@ -202,6 +218,14 @@ function canFlush(tr) {
   return tr._finished || tr._pending === 0;
 }
 
+function callFlushSafe(stream, next, cb) {
+  try {
+    cb(null, stream.__flush(next));
+  } catch (err) {
+    cb(err);
+  }
+}
+
 TransformPromiseStream.prototype._flush = function(done) {
   var isDone = false;
 
@@ -213,16 +237,22 @@ TransformPromiseStream.prototype._flush = function(done) {
     else done();
   }
 
+  var result;
+  function onflush(err, r) {
+    if (err) {
+      self.emit('error', err);
+    } else {
+      result = util.isIterable(r) ? consec(r) : r;
+    }
+  }
+
   if (this.__flush) {
-    var promise = this.__flush(next);
+    callFlushSafe(this, next, onflush);
 
     if (isDone) return;
 
-    if (util.isIterable(promise))
-      promise = consec(promise);
-
-    if (util.isPromise(promise))
-      this._onFlushPromise(promise, next);
+    if (util.isPromise(result))
+      this._onFlushPromise(result, next);
 
   } else if (canFlush(this)) {
     done(this._error);

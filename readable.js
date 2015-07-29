@@ -72,14 +72,30 @@ ReadablePromiseStream.prototype._returnValue = undefined
 
 ReadablePromiseStream.prototype.__read = util.noop
 
+function callReadSafe(stream, n, cb) {
+  try {
+    cb(null, stream.__read(n));
+  } catch (err) {
+    cb(err);
+  }
+}
+
 ReadablePromiseStream.prototype._read = function (n) {
   var self = this
-  var r = self.__read(n)
+  var result;
 
-  if (util.isIterable(r)) r = consec(r)
+  function onread(err, r) {
+    if (err) {
+      self.emit('error', err);
+    } else {
+      result = util.isIterable(r) ? consec(r) : r;
+    }
+  }
 
-  if (util.isPromise(r)) {
-    r.then(function (data) {
+  callReadSafe(self, n, onread);
+
+  if (util.isPromise(result)) {
+    result.then(function (data) {
       self.push(data)
     },
     function (err) {
