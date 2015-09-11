@@ -272,30 +272,28 @@ function bindSingle(ctx, method) {
   }
 }
 
-TransformPromiseStream.prototype._onFinish = function (success) {
-  return success(this.data);
+TransformPromiseStream.prototype._onFinish = function (err) {
+  return err || this.data;
 };
 
 TransformPromiseStream.prototype.done = function () {
-  if (this._finished)
+  var self = this;
+  if (self._finished)
     return Promise.resolve();
 
-  else if (this._error)
-    return Promise.reject(this._error);
+  else if (self._error)
+    return Promise.reject(self._error);
 
-  return util.MakePromise(this, 'finish');
+  return util.MakePromise(self, 'finish', function onSuccess(err) {
+    return self._onFinish(err);
+  });
 };
 TransformPromiseStream.prototype.promise = TransformPromiseStream.prototype.done;
 
 TransformPromiseStream.prototype.then = function (success, fail) {
-  var self = this;
   success = bindSingle(self, success);
   fail = bindSingle(self, fail || function (err) { throw err; });
-  return this.promise().then(onSuccess, fail);
-
-  function onSuccess() {
-    return self._onFinish(success);
-  }
+  return this.promise().then(success, fail);
 }
 
 TransformPromiseStream.prototype.catch = function (fn) {
@@ -320,7 +318,7 @@ TransformSyncPromiseStream.prototype = Object.create(TransformPromiseStream.prot
 });
 
 TransformSyncPromiseStream.prototype._onFinish = function (success) {
-  return success(this.buffer);
+  return success(this.data);
 };
 
 TransformSyncPromiseStream.prototype.__write = TransformSyncPromiseStream.prototype._write;
@@ -384,7 +382,7 @@ TransformRacePromiseStream.prototype = Object.create(TransformPromiseStream.prot
 });
 
 TransformRacePromiseStream.prototype._onFinish = function (success) {
-  return success(this.buffer);
+  return success(this.data);
 };
 
 TransformRacePromiseStream.prototype._onTransformPromise = function (promise, push, next) {
