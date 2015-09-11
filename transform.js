@@ -40,6 +40,11 @@ function TransformPromiseStream(options, transform, flush) {
 
   Transform.call(this, options);
 
+  if (options && 'data' in options)
+    this.data = options.data;
+  else
+    this.data = [];
+
   if (opts.state) this.state = opts.state;
 
   this._finished = false;
@@ -268,7 +273,7 @@ function bindSingle(ctx, method) {
 }
 
 TransformPromiseStream.prototype._onFinish = function (success) {
-  return success(this.buffer);
+  return success(this.data);
 };
 
 TransformPromiseStream.prototype.done = function () {
